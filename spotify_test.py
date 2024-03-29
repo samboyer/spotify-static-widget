@@ -34,6 +34,11 @@ FTP_PASS = open("FTP_PASSWORD").read().strip()
 TRACKS_JSON_PATH = Path("tracks.json")
 
 
+def _requests_get(url, *args, **kwargs):
+    print(f"Fetching {url}...")
+    return requests.get(url, *args, **kwargs)
+
+
 print("Getting API token from client secret...")
 API_KEY = requests.post(
     "https://accounts.spotify.com/api/token",
@@ -52,14 +57,14 @@ playlist_url = f"https://api.spotify.com/v1/playlists/{PLAYLIST_ID}/tracks?{urle
 
 more = True
 while playlist_url:
-    print(f"Fecthing {playlist_url}")
-    data = requests.get(
+    data = _requests_get(
         playlist_url, headers={"Authorization": f"Bearer {API_KEY}"}
     ).json()
     all_tracks.extend(data["items"])
     playlist_url = data["next"]
 
-tracks_to_use = all_tracks[:5]
+# (careful not to kill the server by adding too many songs!)
+tracks_to_use = all_tracks
 
 
 old_track_data = (
@@ -84,8 +89,7 @@ for track in tracks_to_use:
         any_track_changed = True
 
         songlink_url = f"https://api.song.link/v1-alpha.1/links?url=spotify%3Atrack%3A{track_id}&userCountry=GB"
-        print(f"Fecthing {songlink_url}...")
-        songlink_data = requests.get(songlink_url).json()
+        songlink_data = _requests_get(songlink_url).json()
 
         entity_data = songlink_data["entitiesByUniqueId"][
             [
@@ -99,22 +103,42 @@ for track in tracks_to_use:
         image_path = Path(f"img/{thumbnail_url.split('/')[-1]}.jpg")
         image_mono_path = image_path.with_suffix(".mono.png")
 
-        print(f"Fetching {thumbnail_url}...")
-        image_path.write_bytes(requests.get(thumbnail_url).content)
+        image_path.write_bytes(_requests_get(thumbnail_url).content)
 
         preview_url = track["track"]["preview_url"]
         if preview_url is not None:
-            preview_path = Path(f"audio/{preview_url.split('/')[-1].split('?')[0]}.mp3")
-            print(f"Fetching {preview_url}...")
-            preview_path.write_bytes(requests.get(preview_url).content)
-            processed_preview_path = preview_path.with_suffix(".proc.mp3")
+            preview_dest_path = Path(
+                f"audio/{preview_url.split('/')[-1].split('?')[0]}.mp3"
+            )
+        # else:
+        #     # Get a 30sec preview from iTunes instead
+        #     # (only use as a backup bc they're much higher bitrate)
+        #     try:
+        #         itunes_track_id = [
+        #             entity.split("::")[1].removesuffix(":")
+        #             for entity in songlink_data["entitiesByUniqueId"].keys()
+        #             if entity.startswith("ITUNES_SONG")
+        #         ][0]
+        #     except IndexError:
+        #         itunes_track_id = ""
+        #     if itunes_track_id:
+        #         itunes_data = _requests_get(
+        #             f"https://itunes.apple.com/us/lookup?id={itunes_track_id}"
+        #         ).json()
+        #         preview_url = itunes_data["results"][0]["previewUrl"]
+        #         preview_dest_path = f"audio/{itunes_track_id}.m4a"
+
+        if preview_url is not None:
+            preview_dest_path.write_bytes(_requests_get(preview_url).content)
+
+            processed_preview_path = preview_dest_path.with_suffix(".proc.mp3")
             print(f"Processing {preview_url}...")
             subprocess.run(
                 [
                     "ffmpeg",
                     "-y",
                     "-i",
-                    preview_path,
+                    preview_dest_path,
                     "-af",
                     "volume=0.25",
                     processed_preview_path,
@@ -168,7 +192,6 @@ with open("index.html", "w") as results:
     results.write(results_template.render({"tracks": list(new_track_data.values())}))
 
 # Upload over FTP
-# @@@ clear MP3 dir to prevent space buildup
 dirs_to_clear = ["audio"]
 files_to_upload = [
     "index.html",
