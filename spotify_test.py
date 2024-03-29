@@ -22,10 +22,8 @@ PLATFORMS_TO_LINK_TO = [
     "soundcloud",
 ]
 
-# For some reason I can't use an <img> tag for these icons, so I'll just embed
-# the SVG code directly in the HTML.
 PLATFORM_TO_ICON = {
-    platform: Path(f"assets/{platform}.svg").read_text()
+    platform: f'<img src="assets/{platform}.svg" />'
     for platform in PLATFORMS_TO_LINK_TO
 }
 
@@ -156,12 +154,11 @@ for track in tracks_to_use:
             "image_mono": str(image_mono_path),
             "links": link_list,
             "songlink_url": songlink_data["pageUrl"],
-            "preview_mp3": str(processed_preview_path) if playlist_url else "",
+            "preview_mp3": str(processed_preview_path) if preview_url else "",
         }
 
 TRACKS_JSON_PATH.write_text(json.dumps(new_track_data, indent=2))
 
-new_track_data = json.loads(TRACKS_JSON_PATH.read_text())
 
 # Generate HTML
 print("Generating HTML...")
@@ -170,14 +167,17 @@ results_template = environment.get_template("widget.html.tmpl")
 with open("index.html", "w") as results:
     results.write(results_template.render({"tracks": list(new_track_data.values())}))
 
-
 # Upload over FTP
-# @@@ clear MP3 dir to prevent explosion
+# @@@ clear MP3 dir to prevent space buildup
 dirs_to_clear = ["audio"]
 files_to_upload = [
     "index.html",
     *(track["image_mono"] for track in new_track_data.values()),
-    *(track["preview_mp3"] for track in new_track_data.values()),
+    *(
+        track["preview_mp3"]
+        for track in new_track_data.values()
+        if track["preview_mp3"]
+    ),
     *Path("assets").glob("*"),
 ]
 
@@ -192,6 +192,8 @@ def _try_mkdir(ftp, dir):
 print("Sending to FTP server...")
 with ftplib.FTP(FTP_DOMAIN, FTP_USER, FTP_PASS) as ftp:
     ftp.cwd(FTP_SUBDIR)
+
+    # @@@ empty audio dir so I don't eat all the space
     _try_mkdir(ftp, "img")
     _try_mkdir(ftp, "audio")
     _try_mkdir(ftp, "assets")

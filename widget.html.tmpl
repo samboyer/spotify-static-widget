@@ -14,7 +14,7 @@
                 <audio controls src="{{ track.preview_mp3 }}" preload="none" controlslist="play nodownload noplaybackrate" onplay="pauseOthers(this);"></audio>
                 {% endif %}
                 <br />
-                {% for link in track.links %}<a href="{{ link.url }}" target="_blank">{{ link.icon }}</a>{% endfor %}
+                {% for link in track.links %}<a href="{{ link.url }}" target="_blank"><img src="assets/{{ link.platform }}.svg" width="24px" height="24px"/></a>{% endfor %}
             </div>
         </div>
         {% endfor %}
@@ -51,6 +51,7 @@ b {
     font-style: italic;
     font-weight: 100;
     color: #999;
+    white-space: nowrap;
 }
 .track{
     display: inline-flex;
@@ -60,7 +61,7 @@ b {
     margin-right:10px;
     min-width:400px;
 }
-.track img{
+.track>img{
     height:150px;
 }
 .track img, .trackinfo, .trackinfo a{
