@@ -1,8 +1,10 @@
 import ftplib
 import json
 import subprocess
+import time
 from pathlib import Path
 from urllib.parse import urlencode
+import sys
 
 import dateutil.parser
 import jinja2
@@ -68,26 +70,28 @@ tracks_to_use = all_tracks
 
 
 old_track_data = (
-    json.loads(TRACKS_JSON_PATH.read_text()) if TRACKS_JSON_PATH.exists() else {}
+    json.loads(TRACKS_JSON_PATH.read_text())
+    if TRACKS_JSON_PATH.exists()
+    else {}
 )
 
 
 # Fetch song.link data & artwork for each track
 
-any_track_changed = False
 Path("img").mkdir(exist_ok=True)
 Path("audio").mkdir(exist_ok=True)
 
 new_track_data = {}
+files_to_upload = []
+
 for track in tracks_to_use:
     track_id = track["track"]["id"]
     # Don't fetch song.link data if we already have it
     if track_id in old_track_data:
         print(f"Already got '{track['track']['name']}'")
         new_track_data[track_id] = old_track_data[track_id]
-    else:
-        any_track_changed = True
 
+    else:
         songlink_url = f"https://api.song.link/v1-alpha.1/links?url=spotify%3Atrack%3A{track_id}&userCountry=GB"
         songlink_data = _requests_get(songlink_url).json()
 
@@ -145,10 +149,12 @@ for track in tracks_to_use:
                 ]
             )
 
+            files_to_upload.append(processed_preview_path)
+
         print(f"Processing {image_path} with imagemagick...")
         subprocess.run(
             [
-                "magick",
+                # "magick",
                 "convert",
                 image_path,
                 "-colors",
@@ -181,6 +187,9 @@ for track in tracks_to_use:
             "preview_mp3": str(processed_preview_path) if preview_url else "",
         }
 
+        files_to_upload.append(image_mono_path)
+
+
 TRACKS_JSON_PATH.write_text(json.dumps(new_track_data, indent=2))
 
 
@@ -189,20 +198,24 @@ print("Generating HTML...")
 environment = jinja2.Environment(loader=jinja2.FileSystemLoader("."))
 results_template = environment.get_template("widget.html.tmpl")
 with open("index.html", "w") as results:
-    results.write(results_template.render({"tracks": list(new_track_data.values())}))
+    results.write(
+        results_template.render({"tracks": list(new_track_data.values())})
+    )
 
 # Upload over FTP
-dirs_to_clear = ["audio"]
-files_to_upload = [
-    "index.html",
-    *(track["image_mono"] for track in new_track_data.values()),
-    *(
-        track["preview_mp3"]
-        for track in new_track_data.values()
-        if track["preview_mp3"]
-    ),
-    *Path("assets").glob("*"),
-]
+if "--full" in sys.argv:
+    files_to_upload = [
+        "index.html",
+        *(track["image_mono"] for track in new_track_data.values()),
+        *(
+            track["preview_mp3"]
+            for track in new_track_data.values()
+            if track["preview_mp3"]
+        ),
+        *Path("assets").glob("*"),
+    ]
+else:
+    files_to_upload.append("index.html")
 
 
 def _try_mkdir(ftp, dir):
@@ -225,5 +238,7 @@ with ftplib.FTP(FTP_DOMAIN, FTP_USER, FTP_PASS) as ftp:
         with open(file, "rb") as f:
             print(f"Uploading {file}...")
             ftp.storbinary(f"STOR {file}", f)
+
+    time.sleep(1)
 
     ftp.quit()
